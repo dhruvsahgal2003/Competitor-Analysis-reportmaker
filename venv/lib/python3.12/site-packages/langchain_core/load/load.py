@@ -1,3 +1,5 @@
+"""Load LangChain objects from JSON strings or objects."""
+
 import importlib
 import json
 import os
@@ -87,6 +89,7 @@ class Reviver:
         )
 
     def __call__(self, value: dict[str, Any]) -> Any:
+        """Revive the value."""
         if (
             value.get("lc") == 1
             and value.get("type") == "secret"
@@ -98,8 +101,7 @@ class Reviver:
             else:
                 if self.secrets_from_env and key in os.environ and os.environ[key]:
                     return os.environ[key]
-                msg = f'Missing key "{key}" in load(secrets_map)'
-                raise KeyError(msg)
+                return None
 
         if (
             value.get("lc") == 1
@@ -170,6 +172,7 @@ def loads(
     additional_import_mappings: Optional[dict[tuple[str, ...], tuple[str, ...]]] = None,
 ) -> Any:
     """Revive a LangChain class from a JSON string.
+
     Equivalent to `load(json.loads(text))`.
 
     Args:
@@ -205,8 +208,10 @@ def load(
     secrets_from_env: bool = True,
     additional_import_mappings: Optional[dict[tuple[str, ...], tuple[str, ...]]] = None,
 ) -> Any:
-    """Revive a LangChain class from a JSON object. Use this if you already
-    have a parsed JSON object, eg. from `json.load` or `orjson.loads`.
+    """Revive a LangChain class from a JSON object.
+
+    Use this if you already have a parsed JSON object,
+    eg. from `json.load` or `orjson.loads`.
 
     Args:
         obj: The object to load.

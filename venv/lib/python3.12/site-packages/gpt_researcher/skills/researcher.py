@@ -96,7 +96,6 @@ class ResearchConductor:
             self.logger.info("Using web search")
             research_data = await self._get_context_by_web_search(self.researcher.query, [], self.researcher.query_domains)
 
-        # ... rest of the conditions ...
         elif self.researcher.report_source == ReportSource.Local.value:
             self.logger.info("Using local search")
             document_data = await DocumentLoader(self.researcher.cfg.doc_path).load()
@@ -290,11 +289,7 @@ class ResearchConductor:
             content = await self.researcher.context_manager.get_similar_content_by_query(sub_query, scraped_data)
             self.logger.info(f"Content found for sub-query: {len(str(content)) if content else 0} chars")
 
-            if content and self.researcher.verbose:
-                await stream_output(
-                    "logs", "subquery_context_window", f"📃 {content}", self.researcher.websocket
-                )
-            elif self.researcher.verbose:
+            if not content and self.researcher.verbose:
                 await stream_output(
                     "logs",
                     "subquery_context_not_found",
@@ -329,20 +324,9 @@ class ResearchConductor:
                 self.researcher.websocket,
             )
 
-        content = await self.researcher.context_manager.get_similar_content_by_query_with_vectorstore(sub_query, filter)
+        context = await self.researcher.context_manager.get_similar_content_by_query_with_vectorstore(sub_query, filter)
 
-        if content and self.researcher.verbose:
-            await stream_output(
-                "logs", "subquery_context_window", f"📃 {content}", self.researcher.websocket
-            )
-        elif self.researcher.verbose:
-            await stream_output(
-                "logs",
-                "subquery_context_not_found",
-                f"🤷 No content found for '{sub_query}'...",
-                self.researcher.websocket,
-            )
-        return content
+        return context
 
     async def _get_new_urls(self, url_set_input):
         """Gets the new urls from the given url set.

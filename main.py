@@ -1,80 +1,179 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware  # Import CORS Middleware
-from pydantic import BaseModel
 import os
+import boto3
 import asyncio
-from gpt_researcher import GPTResearcher
 from datetime import datetime
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from gpt_researcher import GPTResearcher
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+from dotenv import load_dotenv
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from supabase import create_client, Client
 
+load_dotenv(dotenv_path=".env.local")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Use service role key
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+
+# ✅ Load environment variables (Set up a .env file or export them manually)
+
+DO_SPACES_REGION = os.getenv("DO_SPACES_REGION")
+DO_SPACES_ENDPOINT = os.getenv("DO_SPACES_ENDPOINT")
+DO_SPACES_KEY = os.getenv("DO_SPACES_KEY")
+DO_SPACES_SECRET = os.getenv("DO_SPACES_SECRET")
+DO_SPACES_BUCKET = os.getenv("DO_SPACES_BUCKET")
+
+# 🚨 Debug print to confirm
+print("✔️ DO_SPACES_REGION:", DO_SPACES_REGION)# ✅ Initialize FastAPI
 app = FastAPI()
 
-# ✅ Allow frontend to communicate with the backend
+# ✅ Enable CORS for frontend requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (you can specify your frontend URL)
+    allow_origins=["*"],  # Change this in production
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
+# ✅ Pydantic Model for API Input
 class ReportRequest(BaseModel):
     company_website: str
     company_domain: str
+    user_id: str
 
+# ✅ Function to generate competitor analysis report
 async def generate_report(company_website, company_domain):
-    """
-    Generates a competitor analysis report using GPTResearcher.
-    """
-    query = f"Analyze competitors of {company_website} in {company_domain} industry using GPTResearcher"
+    query = f"""
+You are a competitive strategy consultant preparing a professional report for {company_website} in the {company_domain} industry.
+
+Your job is to:
+1. Identify top 5 competitors (global & local).
+2. Compare them in terms of market share, digital presence, innovation, pricing, and customer loyalty.
+3. Add insights from recent news, public trends, and tech disruptions (AI, personalization, etc.)
+4. Provide strategic recommendations for {company_website} to improve.
+
+**Structure your response** in the following format:
+
+1. Executive Summary
+2. Table of Contents
+3. Competitor Landscape (with comparison table)
+4. Strengths & Weaknesses of each player
+5. Strategic Trends & Industry Shifts
+6. Recommendations for {company_website}
+7. Sources
+
+Be professional, structured, and avoid markdown formatting (do not use ### or **bold** syntax). Return plain clean text that can be styled in a PDF later.
+"""
+
+    
     researcher = GPTResearcher(query=query, report_type="competitive_analysis")
-    research_result = await researcher.conduct_research() 
-    report = await researcher.write_report()
+    research_result = await researcher.conduct_research()  # Await the research
+    report = await researcher.write_report()  # Await the report writing
+    
     return report
 
+# ✅ Function to save report as a PDF
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+import os
+
 def save_report_as_pdf(title, content):
-    """
-    Saves the generated report as a well-formatted PDF.
-    """
-    sanitized_title = title.replace(" ", "_").replace("https://", "").replace("/", "_") + ".pdf"
-    pdf_path = os.path.join(os.getcwd(), sanitized_title)
+    filename = f"{title.replace(' ', '_')}.pdf"
+    filepath = os.path.join("/tmp", filename)
 
-    c = canvas.Canvas(pdf_path, pagesize=A4)
-    width, height = A4
+    doc = SimpleDocTemplate(filepath, pagesize=A4,
+                            rightMargin=72, leftMargin=72,
+                            topMargin=72, bottomMargin=72)
 
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, height - 50, title)
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Heading1Large', fontSize=18, leading=22, spaceAfter=12, spaceBefore=18, alignment=1, fontName="Helvetica-Bold"))
+    styles.add(ParagraphStyle(name='Heading2Clean', fontSize=14, leading=18, spaceAfter=8, fontName="Helvetica-Bold"))
+    styles.add(ParagraphStyle(name='TOC', fontSize=12, leading=16, spaceBefore=6))
 
-    c.setFont("Helvetica", 12)
-    c.drawString(50, height - 70, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    content_clean = content.replace("###", "").replace("**", "").replace("*", "").replace("```", "").replace("---", "")
 
-    c.setFont("Helvetica", 11)
-    text = c.beginText(50, height - 100)
-    text.setFont("Helvetica", 11)
+    body = []
 
-    for line in content.split("\n"):
-        text.textLine(line)
+    # Cover page
+    body.append(Spacer(1, 180))
+    body.append(Paragraph(title, styles['Heading1Large']))
+    body.append(Spacer(1, 12))
+    body.append(Paragraph("Competitor Analysis Report", styles['Heading2Clean']))
+    body.append(Spacer(1, 300))
+    body.append(Paragraph("Generated by Sftwtrs.AI's DeepResearch™", styles['Normal']))
+    body.append(PageBreak())
 
-    c.drawText(text)
-    c.save()
+    # Table of Contents
+    body.append(Paragraph("Table of Contents", styles['Heading2Clean']))
+    toc_sections = [
+        "1. Executive Summary",
+        "2. Competitor Landscape",
+        "3. SWOT / Feature Comparison",
+        "4. Industry Trends",
+        "5. Strategic Recommendations",
+        "6. Sources"
+    ]
+    for section in toc_sections:
+        body.append(Paragraph(section, styles['TOC']))
+    body.append(PageBreak())
 
-    return pdf_path
+    # Process the content into sections
+    for line in content_clean.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            body.append(Spacer(1, 12))
+        elif stripped.startswith("## "):
+            body.append(Paragraph(stripped[3:], styles['Heading2Clean']))
+        elif stripped.startswith("# "):
+            body.append(PageBreak())
+            body.append(Paragraph(stripped[2:], styles['Heading1Large']))
+        else:
+            body.append(Paragraph(stripped, styles['Normal']))
 
+    doc.build(body)
+    return filepath, filename
+# ✅ Function to upload PDF to Digital Ocean Spaces
+def upload_to_digital_ocean_spaces(filepath, filename):
+    s3_client = boto3.client(
+        "s3",
+        region_name=DO_SPACES_REGION,
+        endpoint_url=DO_SPACES_ENDPOINT,
+        aws_access_key_id=DO_SPACES_KEY,
+        aws_secret_access_key=DO_SPACES_SECRET
+    )
+
+    with open(filepath, "rb") as file:
+        s3_client.upload_fileobj(file, DO_SPACES_BUCKET, filename, ExtraArgs={"ACL": "public-read"})
+
+    return f"{DO_SPACES_ENDPOINT}/{DO_SPACES_BUCKET}/{filename}"
+
+# ✅ FastAPI Endpoint to Generate Report
 @app.post("/generate_report/")
-async def generate_report_endpoint(request: ReportRequest):
-    """
-    API endpoint to generate a competitor analysis report.
-    """
+async def generate_report_api(request: ReportRequest):
     try:
+        # ✅ Step 1: Generate the report
         report_content = await generate_report(request.company_website, request.company_domain)
-        pdf_path = save_report_as_pdf(f"Competitor Analysis for {request.company_website}", report_content)
-        
-        if not os.path.exists(pdf_path):
-            raise HTTPException(status_code=500, detail="Failed to generate report.")
 
-        return FileResponse(pdf_path, media_type="application/pdf", filename=f"Competitor_Analysis_{request.company_website}.pdf")
+        # ✅ Step 2: Save report as a PDF
+        pdf_path, pdf_filename = save_report_as_pdf(f"Competitor Analysis for {request.company_website}", report_content)
+
+        # ✅ Step 3: Upload PDF to Digital Ocean Spaces
+        pdf_url = upload_to_digital_ocean_spaces(pdf_path, pdf_filename)
+
+        # ✅ Step 4: Delete the local file after upload
+        os.remove(pdf_path)
+
+        return {"pdf_url": pdf_url}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
